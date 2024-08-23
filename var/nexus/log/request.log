@@ -1,0 +1,4 @@
+192.158.1.55 user1 [21/Aug/2024:12:34:56 +0000] "GET /repository/maven-public/org/apache/commons/commons-lang3/3.12.0/commons-lang3-3.12.0.pom HTTP/1.1" 200 12345 1567
+192.158.1.43 user2 [21/Aug/2024:12:35:05 +0000] "GET /repository/npm-group/lodash/-/lodash-4.17.21.tgz HTTP/1.1" 404 0 78
+192.168.1.11 user4 [21/Aug/2024:12:35:10 +0000] "GET /repository/maven-snapshots/org/example/my-app/1.0-SNAPSHOT/my-app-1.0-20240821.123456-1.jar HTTP/1.1" 200 6789 845
+192.168.1.15 user3 [21/Aug/2024:12:35:01 +0000] "GET /service/rest/v1/components?repository=maven-releases HTTP/1.1" 201 4567 2345

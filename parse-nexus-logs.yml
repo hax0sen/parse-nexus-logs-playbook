@@ -1,0 +1,137 @@
+- name: Parse Nexus Request Logs
+  hosts: localhost
+  vars:
+    log_directory: "/var/nexus/log"  # Directory where logs are stored
+    latest_log: "request.log"
+    custom_logs: "request-2024"             # Base name for date-patterned logs
+    days_back: 3                            # Number of days back to check logs
+    process_multiple_logs: true             # Set to true to check multiple logs, false to check only current_log
+    tmp_directory: "/tmp"                   # Directory for temporary files
+    local_save_directory:                   # Directory for saving logs locally
+
+
+  tasks:
+    - name: Find all relevant log files (only for log.gz)
+      find:
+        paths: "{{ log_directory }}"
+        patterns: "{{ custom_logs }}*.log*"
+        recurse: no
+      register: found_logs
+      when: process_multiple_logs
+
+    - name: Sort log files by modification time (newest first)
+      set_fact:
+        sorted_logs: "{{ found_logs.files | sort(attribute='mtime', reverse=true) }}"
+      when: process_multiple_logs
+
+    - name: Limit the number of logs to fetch based on days_back
+      set_fact:
+        logs_to_fetch: "{{ sorted_logs[:days_back] }}"
+      when: process_multiple_logs
+
+    - name: Generate patterns for logs to check
+      set_fact:
+        log_patterns: "{{ logs_to_fetch | map(attribute='path') | list }}"
+      when: process_multiple_logs
+
+    - name: Combine multiple GZ files and latest request.log for processing
+      shell: |
+        { zcat {{ log_patterns | join(' ') }}; cat {{ log_directory }}/{{ latest_log }}; } | awk 'NF' > {{ tmp_directory }}/combined.log
+      when: process_multiple_logs and logs_to_fetch | length > 0
+
+#singel log or multiple logs
+    - name: Determine the log file to process
+      set_fact:
+        log_file: "{{ '{{ tmp_directory }}/combined.log' if process_multiple_logs else log_directory + '/' + latest_log }}"
+
+    - name: Process combined log file and categorize requests
+      shell: |
+        awk '/192.158.1./ {print > "{{ tmp_directory }}/individual_requests.log"}
+            /192.168.1./ {print > "{{ tmp_directory }}/machine_requests.log"}
+            /GET/ {get++}
+            /POST/ {post++}
+            /PUT/ {put++}
+            /PATCH/ {patch++}
+            /DELETE/ {delete_count++}
+            / 200 / {ok200++}
+            / 403 / {forbidden403++}
+            / 401 / {unauth401++}
+            / 404 / {notfound404++}
+            END {
+              print "GET requests: " get > "{{ tmp_directory }}/method_counts.log"
+              print "POST requests: " post >> "{{ tmp_directory }}/method_counts.log"
+              print "PUT requests: " put >> "{{ tmp_directory }}/method_counts.log"
+              print "DELETE requests: " delete_count >> "{{ tmp_directory }}/method_counts.log"
+              print "200 OK responses: " ok200 > "{{ tmp_directory }}/status_counts.log"
+              print "403 Forbidden responses: " forbidden403 >> "{{ tmp_directory }}/status_counts.log"
+              print "401 Unauthorized responses: " unauth401 >> "{{ tmp_directory }}/status_counts.log"
+              print "404 Not Found responses: " notfound404 >> "{{ tmp_directory }}/status_counts.log"
+            }' {{ log_file }}
+
+    - name: Read method counts from file
+      shell: "cat {{ tmp_directory }}/method_counts.log"
+      register: method_counts_content
+      changed_when: false
+
+    - name: Read status counts from file
+      shell: "cat {{ tmp_directory }}/status_counts.log"
+      register: status_counts_content
+      changed_when: false
+    
+    - name: Count number of lines in individual_requests.log
+      shell: "wc -l < {{ tmp_directory }}/individual_requests.log"
+      register: individual_requests_count
+      changed_when: false
+
+    - name: Count number of lines in machine_requests.log
+      shell: "wc -l < {{ tmp_directory }}/machine_requests.log"
+      register: machine_requests_count
+      changed_when: false
+
+    - name: Print summary of request data
+      debug:
+        msg:
+          - "=== Summary of Requests ==="
+          - ""
+          - "Log Analysis Details:"
+          - >
+            {% if process_multiple_logs %}
+              Analyzed logs from the past {{ days_back }} days.
+            {% else %}
+              Analyzed only the latest log file: {{ latest_log }}.
+            {% endif %}
+          - ""
+          - "Request Sources:"
+          - "  Individual requests have been written to individual_requests.log (Requests from individual: {{ individual_requests_count.stdout.strip() }})"
+          - "  Machine requests have been written to machine_requests.log (Requests from machines: {{ machine_requests_count.stdout.strip() }})"
+          - ""
+          - "HTTP Methods:"
+          - "{{ method_counts_content.stdout.split('\n') }}"
+          - ""
+          - "Status Codes:"
+          - "{{ status_counts_content.stdout.split('\n') }}"
+
+    # - name: Ensure local save directory exists
+    #   file:
+    #     path: "{{ local_save_directory }}"
+    #     state: directory
+
+    # - name: Copy individual_requests.log to local save directory
+    #   copy:
+    #     src: "{{ tmp_directory }}/individual_requests.log"
+    #     dest: "{{ local_save_directory }}/individual_requests.log"
+    #   when: process_multiple_logs
+
+    # - name: Copy machine_requests.log to local save directory
+    #   copy:
+    #     src: "{{ tmp_directory }}/machine_requests.log"
+    #     dest: "{{ local_save_directory }}/machine_requests.log"
+    #   when: process_multiple_logs
+
+    # - name: Cleanup temporary files
+    #   file:
+    #     path: "{{ tmp_directory }}"
+    #     state: absent
+    #     recurse: yes
+    #   loop: items?
+
